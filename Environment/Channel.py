@@ -22,16 +22,30 @@ def sum_rate(pair_num, state_info, Pmax=1, var_noise=1):
 
 
 class SISO_Channel(Env):
+    """
+    In a NxN SISO channel
+
+    STATE_SPACE:
+    len(STATE_SPACE) = N^2 + N + 1 ,
+    N^2: the channel state information, i.i.d. ,
+    N: the power control ratio of each Tx ,
+    1: the index of the Tx ,
+
+    ACTION_SPACE:
+    a real number between [-1,1] ,
+    it stands for increasing / decreasing the power ratio of a Tx by a number between [-1,1]
+    """
     metadata = {"render.modes":["console"]}
-    def __init__(self, N_pairs, seed = 100) -> None:
+    def __init__(self, N_pairs, seed = 100):
+        super(SISO_Channel, self).__init__()
+        # the random seed to generate channel matrix
         self.seed = seed
         np.random.seed(self.seed)
-        # N : number of transmitter-receiver pairs
-        super(SISO_Channel, self).__init__()
+        # number of transmitter-receiver pairs
         self.pair_num = N_pairs
-        # power control ratio [0,1]
+        # power control ratio (between [0,1] )
         self.action_space = Box(low=np.array([-1]), high=np.array([1]))
-        # total bit of the state info: CSI + power control of each Tx + the position index of Tx
+        # total length of the state space: CSI + power control of each Tx + the position index of Tx
         num_state = N_pairs**2 + N_pairs + 1 
         self.observation_space = Box(low=np.array([0]*num_state), high=np.array([1]*num_state))
         # state space = Channel state information + Power control ratio
@@ -46,24 +60,35 @@ class SISO_Channel(Env):
     
     def step(self, Tx_No, action):
         """
-        Only update one Tx per unit time
+        Only update one Tx per  time
         Tx_No: which transmiter to be optimized
         action: increase / decrease the power
         """
-        # the postion of the optimized Tx in the state info
+        # the postion of the traget Tx in the state info
         Tx_index = self.pair_num**2 + Tx_No
         self.time -= 1
         self.state[Tx_index] += action
 
+        # if the power control ratio of the target Tx exceed 1:
+        #   stop training
+        #   negative rewards to correct this policy
         if self.state[Tx_index] > 1:
             done = True
             reward = - self.state[Tx_index]
+        # if the power control ratio of the target Tx is below 0:
+        #   stop training
+        #   negative rewards to correct this policy (less serious)
         elif self.state[Tx_index] < 0:
             done = True
             reward = self.state[Tx_index] - 1
+        # if the optimization steps exceed the limits:
+        #   stop training
+        #   sum_rate as the reward to guide to improve the policy
         elif self.time < 0:
             done = True
             reward = sum_rate(self.pair_num, self.state)
+        # if the power control ratio of the target Tx is within the target range:
+        #  keep training
         else:
             reward = sum_rate(self.pair_num, self.state)
             done = False
